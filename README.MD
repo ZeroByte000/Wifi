@@ -74,7 +74,7 @@ Jalankan script menggunakan Python dengan akses root (su).
 ### Langkah 1: Jalankan Script
 
 ```bash
-su
+tsu
 python main.py
 ```
 

