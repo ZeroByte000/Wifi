@@ -140,7 +140,7 @@ Ini biasanya error driver GPU pada Android.
 ## 📂 Struktur File
 
 ```
-Redmi-Cracker/
+Wifi/
 ├── main.py           # Script utama
 ├── rockyou.txt       # Wordlist password (auto download)
 ├── scan-01.csv # Hasil scan target
